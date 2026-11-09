@@ -13,7 +13,7 @@ class SqlQuoteRepository:
             CREATE TABLE IF NOT EXISTS quotes (
                 order_id TEXT PRIMARY KEY,
                 amount TEXT NOT NULL,
-                state TEXT NOT NULL CHECK (state IN ('PENDING', 'APPROVED', 'REJECTED'))
+                state TEXT NOT NULL CHECK (state IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'))
             )
         """)
         self.connection.commit()
@@ -36,6 +36,20 @@ class SqlQuoteRepository:
             (order_id,),
         ).fetchone()
         return dict(zip(("order_id", "amount", "state"), row)) if row else None
+
+    def cancel(self, order_id: str) -> dict:
+        """Idempotent compensation; not a financial refund."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE quotes SET state='CANCELLED' WHERE order_id=? AND state IN ('PENDING', 'APPROVED')",
+                (order_id,),
+            )
+            if cursor.rowcount != 1:
+                existing = self.get(order_id)
+                if existing and existing["state"] == "CANCELLED":
+                    return existing
+                raise ValueError("Quote cannot be cancelled")
+        return self.get(order_id)
 
     def resolve(self, order_id: str, state: str) -> dict:
         if state not in ("APPROVED", "REJECTED"):
