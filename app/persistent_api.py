@@ -75,3 +75,13 @@ def approve_quote(order_id: str):
 @app.post("/quotes/{order_id}/reject")
 def reject_quote(order_id: str):
     return resolve_quote(order_id, "REJECTED")
+
+@app.post("/quotes/{order_id}/cancel")
+def cancel_quote(order_id: str):
+    with repository() as repo:
+        try:
+            return repo.cancel(order_id)
+        except ValueError:
+            if repo.get(order_id) is None:
+                raise HTTPException(404, "Quote not found")
+            raise HTTPException(409, "Quote cannot be cancelled")
