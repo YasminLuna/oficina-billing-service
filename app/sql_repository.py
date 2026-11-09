@@ -17,6 +17,22 @@ class SqlQuoteRepository:
             )
         """)
         self.connection.commit()
+        # Existing SQLite volumes were created with the old CHECK constraint.
+        schema = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='quotes'"
+        ).fetchone()[0]
+        if "'CANCELLED'" not in schema:
+            with self.connection:
+                self.connection.execute("""
+                    CREATE TABLE quotes_v2 (
+                        order_id TEXT PRIMARY KEY,
+                        amount TEXT NOT NULL,
+                        state TEXT NOT NULL CHECK (state IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'))
+                    )
+                """)
+                self.connection.execute("INSERT INTO quotes_v2 SELECT * FROM quotes")
+                self.connection.execute("DROP TABLE quotes")
+                self.connection.execute("ALTER TABLE quotes_v2 RENAME TO quotes")
 
     def create(self, order_id: str, amount: str) -> dict:
         value = Decimal(amount)
