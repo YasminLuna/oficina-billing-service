@@ -14,6 +14,10 @@ spec:
       labels:
         app: oficina-billing-service
     spec:
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
       containers:
       - name: app
         image: oficina-billing-service:local
