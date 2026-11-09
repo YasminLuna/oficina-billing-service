@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from app.sql_repository import SqlQuoteRepository
+from app.payment_gateway import create_payment, PaymentGatewayError
 
 app = FastAPI(title="Oficina Billing - Local SQL", version="0.2.0")
 
@@ -85,3 +86,28 @@ def cancel_quote(order_id: str):
             if repo.get(order_id) is None:
                 raise HTTPException(404, "Quote not found")
             raise HTTPException(409, "Quote cannot be cancelled")
+
+
+class PaymentInput(BaseModel):
+    token: str = ""
+    payer_email: str = ""
+    payment_method_id: str = "pix"
+
+
+@app.post("/quotes/{order_id}/payments", status_code=202)
+def initiate_payment(order_id: str, data: PaymentInput):
+    """Create a pending payment request. Never auto-approve a quote."""
+    with repository() as repo:
+        quote = repo.get(order_id)
+    if quote is None:
+        raise HTTPException(404, "Quote not found")
+    if quote["state"] != "APPROVED":
+        raise HTTPException(409, "Quote must be approved before payment")
+    try:
+        return create_payment(order_id=order_id, amount=quote["amount"],
+                              token=data.token, email=data.payer_email,
+                              payment_method_id=data.payment_method_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except PaymentGatewayError as exc:
+        raise HTTPException(503, str(exc)) from exc
