@@ -1,0 +1,76 @@
+# Local-only manifests. Load images into kind/minikube before applying.
+# External dependencies (PostgreSQL, DynamoDB Local) must be configured separately.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-billing-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oficina-billing-service
+  template:
+    metadata:
+      labels:
+        app: oficina-billing-service
+    spec:
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+      - name: app
+        image: oficina-billing-service:local
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        env:
+        - name: BILLING_SQLITE_PATH
+          value: /data/oficina-billing.db
+        volumeMounts:
+        - name: billing-data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: billing-data
+        persistentVolumeClaim:
+          claimName: oficina-billing-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-billing-service
+spec:
+  selector:
+    app: oficina-billing-service
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oficina-billing-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
