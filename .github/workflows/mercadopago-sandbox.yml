@@ -1,0 +1,40 @@
+name: Mercado Pago sandbox connectivity
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/fase4-service]
+    paths: ['.github/workflows/mercadopago-sandbox.yml']
+permissions:
+  contents: read
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      MERCADOPAGO_ACCESS_TOKEN: ${{ secrets.MERCADOPAGO_ACCESS_TOKEN }}
+    steps:
+      - name: Verify test credential with read-only API request
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import urllib.request
+          import urllib.error
+          token = os.environ.get("MERCADOPAGO_ACCESS_TOKEN", "")
+          if not token.startswith("TEST-"):
+              raise SystemExit("Missing TEST- credential; refusing to use production credentials.")
+          request = urllib.request.Request(
+              "https://api.mercadopago.com/v1/payments/search?limit=1",
+              headers={"Authorization": "Bearer " + token},
+              method="GET",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  if response.status != 200:
+                      raise SystemExit("Unexpected HTTP status")
+                  print("PASS: authenticated read-only Payments API request (HTTP 200)")
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(f"Mercado Pago returned HTTP {exc.code}") from None
+          except urllib.error.URLError:
+              raise SystemExit("Mercado Pago connection failed") from None
+          PY
