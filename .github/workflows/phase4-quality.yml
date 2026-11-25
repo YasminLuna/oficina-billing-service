@@ -36,3 +36,32 @@ jobs:
           name: billing-coverage
           path: coverage.xml
           if-no-files-found: ignore
+
+  deploy-kind:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: fase4-ci
+      - name: Build and load image
+        run: |
+          docker build -t oficina-billing-service:local .
+          kind load docker-image oficina-billing-service:local --name fase4-ci
+      - name: Deploy to ephemeral Kubernetes
+        run: |
+          kubectl --context kind-fase4-ci create namespace fiap-fase4
+          kubectl --context kind-fase4-ci -n fiap-fase4 apply -f k8s/local-service.yaml
+          kubectl --context kind-fase4-ci -n fiap-fase4 rollout status deployment/oficina-billing-service --timeout=180s
+      - name: Verify HTTP readiness
+        run: |
+          kubectl --context kind-fase4-ci -n fiap-fase4 port-forward svc/oficina-billing-service 18080:8080 >/tmp/forward.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          curl --fail --retry 15 --retry-connrefused --retry-delay 2 http://localhost:18080/health
+          curl --fail http://localhost:18080/openapi.json -o /tmp/openapi.json
+      - name: Collect deployment evidence
+        if: always()
+        run: kubectl --context kind-fase4-ci -n fiap-fase4 get deployments,pods,pvc,svc -o wide
