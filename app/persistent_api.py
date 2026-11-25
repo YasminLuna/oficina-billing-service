@@ -1,5 +1,6 @@
 """Local SQLite-backed Billing API. Each request opens a short-lived connection."""
 import os
+import json
 import sqlite3
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
@@ -104,10 +105,35 @@ def initiate_payment(order_id: str, data: PaymentInput):
     if quote["state"] != "APPROVED":
         raise HTTPException(409, "Quote must be approved before payment")
     try:
-        return create_payment(order_id=order_id, amount=quote["amount"],
-                              token=data.token, email=data.payer_email,
-                              payment_method_id=data.payment_method_id)
+        with repository() as repo:
+            conn = repo.connection
+            conn.execute("CREATE TABLE IF NOT EXISTS payments (order_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            conn.commit()
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT payload FROM payments WHERE order_id=?", (order_id,)).fetchone()
+                if row:
+                    return json.loads(row[0])
+                current = repo.get(order_id)
+                if not current or current["state"] != "APPROVED":
+                    raise HTTPException(409, "Quote must be approved before payment")
+                result = create_payment(order_id=order_id, amount=current["amount"],
+                                        token=data.token, email=data.payer_email,
+                                        payment_method_id=data.payment_method_id)
+                conn.execute("INSERT INTO payments VALUES (?, ?)", (order_id, json.dumps(result)))
+                return result
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except PaymentGatewayError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/quotes/{order_id}/payments")
+def get_payment(order_id: str):
+    with repository() as repo:
+        conn = repo.connection
+        conn.execute("CREATE TABLE IF NOT EXISTS payments (order_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+        row = conn.execute("SELECT payload FROM payments WHERE order_id=?", (order_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Payment not found")
+        return json.loads(row[0])
